@@ -7,6 +7,7 @@ output: html_document
 
 ```{r setup, include=FALSE}
 library(tidyverse)
+library(ggplot2)
 ```
 
 # Reading in the dataset
@@ -206,6 +207,26 @@ NA - don't know, refused, missing
 colSums(is.na(survey1))
 # Many features have a large amount of missing values
 
+#plotting Heart Disease and Mental Health
 
+hd_mh <- data.frame(survey1$Heart_Disease, survey1$Ment_Health)#new dataframe for plotting
+hd_mh <- na.omit(hd_mh) #remove NA values
+
+hd_mh$survey1.Heart_Disease <- as.logical(hd_mh$survey1.Heart_Disease)#change proper variable type
+colnames(hd_mh)<- c("Heart_Disease", "Ment_Health")#change column names
+
+hd_mh_means <- hd_mh %>%#summaryzing dataframe
+  group_by(Heart_Disease) %>%
+  summarise(mean_MH = mean(Ment_Health))
+
+#plot the density curves
+ggplot(data = hd_mh, aes(x = Ment_Health, color=Heart_Disease)) +
+  geom_density()+
+  geom_vline(data = hd_mh_means, aes(xintercept=mean_MH), linetype="dashed") + 
+  facet_grid(~Heart_Disease)+
+  ggtitle('Figure 2: Density Curves of Mental Health Accessment')+
+  xlab("Days with Bad Mental Health in Past 30 Days")+
+  ylab("Density")+
+  labs(fill = "Heart Disease")
 ```
 
