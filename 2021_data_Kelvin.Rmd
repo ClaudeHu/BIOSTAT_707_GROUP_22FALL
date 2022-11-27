@@ -1,0 +1,16 @@
+---
+title: "analysis"
+author: "Kelvin Feng"
+date: "2022-11-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+```
+
+```{r}
+dat <- haven::read_xpt("C:/Users/kelvi/Downloads/LLCP2021XPT/LLCP2021.XPT")
+```
+
