@@ -1,0 +1,216 @@
+---
+title: "BIOS 707 Project"
+author: "Costa Stavrianidis"
+date: "2022-11-13"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(VIM)
+library(missMDA)
+```
+
+## Reading in Dataset
+```{r}
+dat <- haven::read_xpt("LLCP2021.XPT")
+```
+
+## Data Cleaning
+```{r}
+# Variables are initially chosen based on domain knowledge of risk factors for heart disease
+# Many variables are also redundant, thus one will be chosen for that feature
+survey1 <- dat %>% select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
+                          PHYSHLTH,`_HCVU652`, MEDCOST1, `_RFHYPE6`,
+                          `_RFCHOL3`, CVDSTRK3, DIABETE4, `_SEX`,
+                          `_EDUCAG`, INCOME3, `_BMI5`, `_SMOKER3`,
+                          AVEDRNK3, `_TOTINDA`, DRADVISE,
+                          `_AGE_G`, `_FRTLT1A`, `_VEGLT1A`) %>% 
+  rename(Gen_Health = `_RFHLTH`, Phys_Health = PHYSHLTH,
+         Ment_Health = MENTHLTH, Med_Cost = MEDCOST1,
+         Stroke = CVDSTRK3, Diabetes = DIABETE4,
+         Sex = `_SEX`, Income = INCOME3,
+         Avg_Drinks = AVEDRNK3, Sodium_Intake = DRADVISE,
+         Health_Cov = `_HCVU652`, BP = `_RFHYPE6`,
+         Chol = `_RFCHOL3`, Heart_Disease = `_MICHD`,
+         Age_Groups = `_AGE_G`, BMI = `_BMI5`,
+         Education = `_EDUCAG`, Smoking = `_SMOKER3`,
+         Fruit = `_FRTLT1A`, Veggies = `_VEGLT1A`,
+         Exercise = `_TOTINDA`, Depression = ADDEPEV3) %>% 
+  mutate(Heart_Disease = recode(Heart_Disease, '2' = 0), 
+         Depression = recode(Depression, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         Ment_Health = recode(Ment_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         Gen_Health = recode(Gen_Health, '2' = 0, '3' = as.numeric(NA)),
+         Phys_Health = recode(Phys_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         Health_Cov = recode(Health_Cov, '2' = 0, '9' = as.numeric(NA)),
+         Med_Cost = recode(Med_Cost, '2' = 0,
+                           '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         BP = recode(BP, '1' = 0, '2' = 1, '9' = as.numeric(NA)),
+         Chol = recode(Chol, '1' = 0, '2' = 1, '9' = as.numeric(NA)),
+         Stroke = recode(Stroke, '1' = 1, '2' = 0,
+                         '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         Diabetes = recode(Diabetes, '2' = 1, '3' = 0, '4' = 2,
+                           '1' = 1, '7' = as.numeric(NA),
+                           '9' = as.numeric(NA)),
+         Education = recode(Education, '9' = as.numeric(NA)),
+         Income = recode(Income, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         BMI = BMI/100,
+         Smoking = recode(Smoking, '4' = 1, '3' = 2, '2' = 3, '1' = 4, '9' = as.numeric(NA)),
+         Avg_Drinks = recode(Avg_Drinks,'88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         Exercise = recode(Exercise, '2' = 0, '9' = as.numeric(NA)),
+         Sodium_Intake = recode(Sodium_Intake, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         Fruit = recode(Fruit, '2' = 0, '9' = as.numeric(NA)),
+         Veggies = recode(Veggies, '2' = 0, '9' = as.numeric(NA)))
+
+glimpse(survey1)
+```
+
+## Variable Descriptions
+
+Heart_Disease: Respondents that have ever reported having coronary heart disease (CHD) or myocardial infarction (MI) \
+0 - did not report \
+1 - reported \
+NA - not asked or missing
+
+Depression: (Ever told) you that you have a depressive disorder, including depression, major depression, dysthymia, or minor depression? \
+0 - no \
+1 - yes \
+NA - don't know, refused \
+
+Ment_Health: Now thinking about your mental health, which includes stress, depression, and problems with emotions, for how many days during the past 30 days was your mental health not good? \
+0:30 - # of days \
+NA - don't know, refused
+
+Gen_Health: Adults with good or better general health \
+0 - fair or poor health \
+1 - good or better health \
+NA - don't know, not sure or refused/missing
+
+Phys_Health: Now thinking about your physical health, which includes physical illness and injury, for how many days during the past 30 days was your physical health not good? \
+0:30 - # days \
+NA - don't know, refused, missing
+
+Health_Cov: Respondents aged 18-64 who have any form of health care coverage \
+0 - do not have \
+1 - have \
+NA - don't know, refused, missing
+
+Med_Cost: Was there a time in the past 12 months when you needed to see a doctor but could not because of cost? \
+0 - no \
+1 - yes \
+NA - don't know, refused, missing
+
+BP: Adults who have been told they have high blood pressure by a doctor, nurse, or other health professional \
+0 - no \
+1 - yes \
+NA - don't know, refused, missing
+
+Chol: Adults who have had their cholesterol checked and have been told by a doctor, nurse, or other health professional that it was high \
+0 - no \
+1 - yes \
+NA - don't know, refused, missing
+
+Stroke: (Ever told) you had a stroke \
+0 - no \
+1 - yes \
+NA - don't know, refused
+
+Diabetes: (Ever told) you have diabetes (If "Yes" and respondent is female, ask "Was this only when you were pregnant?". If Respondent says pre-diabetes or borderline diabetes, use response code 4.) \
+0 - no \
+1 - yes \
+2 - pre-diabetes or borderline \
+NA - don't know, refused, missing
+
+Sex: Indicate sex of respondent \
+1 - male \
+2 - female
+
+Education: Level of education completed \
+1 - did not graduate highschool \
+2 - graduated highschool \
+3 - attended college or technical school \
+4 - graduated from college or technical school \
+NA - don't know, refused, missing
+
+Income: Is your annual household income from all sources: (If respondent refuses at any income level, code "Refused.") \
+1 - <$10,000 \
+2 - $10,000:$14,999 \
+3 - $15,000:$19,999 \
+4 - $20,000:$24,999 \
+5 - $25,000:$34,999 \
+6 - $35,000:$49,999 \
+7 - $50,000:$74,999 \
+8 - $75,000:$99,999 \
+9 - $100,000:$149,999 \
+10 - $150,000:$199,000 \
+11 - $200,000+ \
+NA - don't know, refused, missing
+
+BMI: Body Mass Index (BMI) \
+1:99.99 - bmi\
+NA - don't know, refused, missing \
+
+Smoking: Four-level smoker status: Everyday smoker, Someday smoker, Former smoker, Non-smoker \
+1 - never smoked \
+2 - former smoker \
+3 - now smokes some days \
+4 - now smokes every day \
+NA - don't know, refused, missing
+
+Avg_Drinks: One drink is equivalent to a 12-ounce beer, a 5-ounce glass of wine, or a drink with one shot of liquor. During the past 30 days, on the days when you drank, about how many drinks did you drink on the average? (A 40 ounce beer would count as 3 drinks, or a cocktail drink with 2 shots would count as 2 drinks.) \
+1:76 - # of drinks \
+NA - don't know, refused, missing
+
+Exercise: Adults who reported doing physical activity or exercise during the past 30 days other than their regular job \
+0 - did not have physical activity or exercise \
+1 - had physical activity or exercise \
+NA - don't know, refused, missing
+
+Sodium_Intake: Has a doctor or other health professional ever advised you to reduce sodium or salt intake? \
+0 - no \
+1 - yes \
+NA - don't know, refused, missing
+
+Age_65: Age categories \
+1 - age 18:24 \
+2 - age 25:34 \
+3 - age 35:44 \
+4 - age 45:54 \
+5 - age 55:64 \
+6 - age 65+ \
+NA - don't know, refused, missing
+
+Fruit: Consume Fruit 1 or more times per day \
+0 - less than one time per day \
+1 - one or more times per day \
+NA - don't know, refused, missing
+
+Veggies: Consume Vegetables 1 or more times per day \
+0 - less than one time per day \
+1 - one or more times per day \
+NA - don't know, refused, missing
+
+## Exploratory Data Analysis
+```{r, warning=FALSE}
+# Missingness
+colSums(is.na(survey1)) / nrow(survey1)
+
+# Drop variables with >80% missingness
+survey2 <- survey1 %>% select(-Sodium_Intake)
+
+# Impute continuous BMI variable with mean imputation
+mean_bmi <- mean(survey2$BMI, na.rm = T)
+survey2 <- survey2 %>% mutate(BMI = ifelse(is.na(BMI), mean_bmi, BMI))
+
+# Impute categorical variables with sequential, random hot-deck imputation
+survey2 <- hotdeck(survey2)
+
+# Checking for duplicates in original dataset
+dat$SEQNO <- as.factor(dat$SEQNO)
+duplicates <- dat %>% group_by(SEQNO, `_STATE`) %>%
+  summarize(count = n()) %>% filter(count > 1)
+dat2 <- dat %>% select(-c(`_STATE`:`_PSU`))
+table(sapply(dat2, class))
+# No duplicates found
+```
