@@ -11,6 +11,66 @@ library(tidyverse)
 ```
 
 ```{r}
+# Reading in dataset
 dat <- haven::read_xpt("C:/Users/kelvi/Downloads/LLCP2021XPT/LLCP2021.XPT")
+```
+
+```{r}
+survey1 <- dat %>% select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
+                          PHYSHLTH,`_HCVU652`, MEDCOST1, `_RFHYPE6`,
+                          `_RFCHOL3`, CVDSTRK3, DIABETE4, `_SEX`,
+                          `_EDUCAG`, INCOME3, `_BMI5`, `_SMOKER3`,
+                          AVEDRNK3, `_TOTINDA`, DRADVISE,
+                          `_AGE_G`, `_FRTLT1A`, `_VEGLT1A`) %>% 
+  rename(Gen_Health = `_RFHLTH`, Phys_Health = PHYSHLTH,
+         Ment_Health = MENTHLTH, Med_Cost = MEDCOST1,
+         Stroke = CVDSTRK3, Diabetes = DIABETE4,
+         Sex = `_SEX`, Income = INCOME3,
+         Avg_Drinks = AVEDRNK3, Sodium_Intake = DRADVISE,
+         Health_Cov = `_HCVU652`, BP = `_RFHYPE6`,
+         Chol = `_RFCHOL3`, Heart_Disease = `_MICHD`,
+         Age_65 = `_AGE_G`, BMI = `_BMI5`,
+         Education = `_EDUCAG`, Smoking = `_SMOKER3`,
+         Fruit = `_FRTLT1A`, Veggies = `_VEGLT1A`,
+         Exercise = `_TOTINDA`, Depression = ADDEPEV3) %>% 
+  mutate(Heart_Disease = recode(Heart_Disease, '2' = 0), 
+         Depression = recode(Depression, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         Ment_Health = recode(Ment_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         Gen_Health = recode(Gen_Health, '2' = 0, '3' = as.numeric(NA)),
+         Phys_Health = recode(Phys_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         Health_Cov = recode(Health_Cov, '2' = 0, '9' = as.numeric(NA)),
+         Med_Cost = recode(Med_Cost, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         BP = recode(BP, '1' = 0, '2' = 1, '9' = as.numeric(NA)),
+         Chol = recode(Chol, '1' = 0, '2' = 1, '9' = as.numeric(NA)),
+         Stroke = recode(Stroke, '1' = 0, '2' = 1, '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         Diabetes = recode(Diabetes, '2' = 1, '3' = 1, '4' = 2, '1' = 3, '7' = as.numeric(NA), 
+                           '9' = as.numeric(NA)),
+         Education = recode(Education, '9' = as.numeric(NA)),
+         Income = recode(Income, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         BMI = BMI/100,
+         Smoking = recode(Smoking, '4' = 1, '3' = 2, '2' = 3, '1' = 4, '9' = as.numeric(NA)),
+         Avg_Drinks = recode(Avg_Drinks, '77' = as.numeric(NA), '99' = as.numeric(NA)),
+         Exercise = recode(Exercise, '2' = 0, '9' = as.numeric(NA)),
+         Sodium_Intake = recode(Sodium_Intake, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
+         Fruit = recode(Fruit, '2' = 0, '9' = as.numeric(NA)),
+         Veggies = recode(Veggies, '2' = 0, '9' = as.numeric(NA)))
+
+```
+
+```{r}
+
+# Checking for duplicates
+dat$SEQNO <- as.factor(dat$SEQNO)
+duplicates <- dat %>% group_by(SEQNO, `_STATE`) %>%
+  summarize(count = n()) %>% filter(count > 1)
+
+dat2 <- dat %>% select(-c(`_STATE`:`_PSU`))
+table(sapply(dat2, class))
+
+missingness = as.data.frame(round(colSums(is.na(dat2))/length(dat2$`_MICHD`), 3))
+colnames(missingness) <- "Value"
+remove <- missingness %>% filter(Value > 0.8) %>% rownames()
+
+dat3 <- dat2 %>% select(-all_of(remove))
 ```
 
