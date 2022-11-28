@@ -201,7 +201,7 @@ NA - don't know, refused, missing
 colSums(is.na(survey1)) / nrow(survey1)
 
 # Drop variables with >80% missingness
-survey2 <- survey1 %>% dplyr::select(-Sodium_Intake) %>% na.omit()
+survey2 <- survey1 %>% dplyr::select(-Sodium_Intake)
 
 # Impute variables with sequential, random hot-deck imputation
 survey2 <- hotdeck(survey2)
