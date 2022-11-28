@@ -9,7 +9,11 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(VIM)
-library(missMDA)
+library(caTools)
+library(visreg)
+library(caret)
+library(MASS)
+library(boot)
 ```
 
 ## Reading in Dataset
@@ -21,7 +25,7 @@ dat <- haven::read_xpt("LLCP2021.XPT")
 ```{r}
 # Variables are initially chosen based on domain knowledge of risk factors for heart disease
 # Many variables are also redundant, thus one will be chosen for that feature
-survey1 <- dat %>% select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
+survey1 <- dat %>% dplyr::select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
                           PHYSHLTH,`_HCVU652`, MEDCOST1, `_RFHYPE6`,
                           `_RFCHOL3`, CVDSTRK3, DIABETE4, `_SEX`,
                           `_EDUCAG`, INCOME3, `_BMI5`, `_SMOKER3`,
@@ -41,7 +45,7 @@ survey1 <- dat %>% select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
   mutate(Heart_Disease = recode(Heart_Disease, '2' = 0), 
          Depression = recode(Depression, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
          Ment_Health = recode(Ment_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
-         Gen_Health = recode(Gen_Health, '2' = 0, '3' = as.numeric(NA)),
+         Gen_Health = recode(Gen_Health, '2' = 0, '3' = as.numeric(NA), '9' = as.numeric(NA)),
          Phys_Health = recode(Phys_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
          Health_Cov = recode(Health_Cov, '2' = 0, '9' = as.numeric(NA)),
          Med_Cost = recode(Med_Cost, '2' = 0,
@@ -197,20 +201,121 @@ NA - don't know, refused, missing
 colSums(is.na(survey1)) / nrow(survey1)
 
 # Drop variables with >80% missingness
-survey2 <- survey1 %>% select(-Sodium_Intake)
+survey2 <- survey1 %>% dplyr::select(-Sodium_Intake) %>% na.omit()
 
-# Impute continuous BMI variable with mean imputation
-mean_bmi <- mean(survey2$BMI, na.rm = T)
-survey2 <- survey2 %>% mutate(BMI = ifelse(is.na(BMI), mean_bmi, BMI))
-
-# Impute categorical variables with sequential, random hot-deck imputation
+# Impute variables with sequential, random hot-deck imputation
 survey2 <- hotdeck(survey2)
+survey2 <- survey2 %>% dplyr::select(1:21)
 
 # Checking for duplicates in original dataset
 dat$SEQNO <- as.factor(dat$SEQNO)
 duplicates <- dat %>% group_by(SEQNO, `_STATE`) %>%
   summarize(count = n()) %>% filter(count > 1)
-dat2 <- dat %>% select(-c(`_STATE`:`_PSU`))
+dat2 <- dat %>% dplyr::select(-c(`_STATE`:`_PSU`))
 table(sapply(dat2, class))
 # No duplicates found
+```
+
+## Relationship Between Mental Health Variables and Heart Disease
+```{r}
+# Chi-square test of independence between Depression and Heart_Disease variables
+# Performed on non-imputed dataset
+table(survey1$Heart_Disease, survey1$Depression)
+chisq.test(survey1$Heart_Disease, survey1$Depression)
+# Chi-square statistic has an associated p-value below 0.05
+# Reject null, evidence supporting the two variables not being independent
+
+# Logistic regression to explore relationship between Depression and Heart_Disease
+# Performed on non-imputed dataset
+logit1 <- glm(Heart_Disease ~ as.factor(Depression), data = survey1)
+summary(logit1)
+# Individuals that have been told they have a depressive disorder have a 0.028 higher log odds of ever having reported coronary heart disease or myocardial infarction compared to individuals that have never been told they have a depressive disorder
+# This coefficient has a statistically significant t-statistic with a p-value below 0.05
+
+exp(coef(logit1))
+# Individuals that have been told they have a depressive disorder have a 2.8% higher odds of ever having reported coronary heart disease or myocardial infarction compared to individuals that have never been told they have a depressive disorder
+
+# Logistic regression to explore relationship between Ment_Health and Heart_Disease
+# Performed on non-imputed dataset
+logit2 <- glm(Heart_Disease ~ Ment_Health, data = survey1)
+summary(logit2)
+# For every one day increase in mental health being considered not good within the past 30 days, the log odds of an individual ever having reported coronary heart disease or myocardial infarction increases by 0.001
+# This coefficient has a statistically significant t-statistic with a p-value below 0.05
+exp(coef(logit2))
+# For every one day increase in mental health being considered not good within the past 30 days, the odds of an individual ever having reported coronary heart disease or myocardial infarction increases by 0.1%
+```
+
+## Logistic Regression for Prediction
+```{r}
+# Change categorical variables to factor
+cols <- c("Depression", "Gen_Health", "Health_Cov", "Med_Cost", "BP", "Chol", "Stroke",
+          "Diabetes", "Sex", "Education", "Income", "Smoking", "Exercise",
+          "Age_Groups", "Fruit", "Veggies")
+survey2[cols] = lapply(survey2[cols], factor)
+
+# Split dataset into training and testing data
+set.seed(100)
+survey3 <- survey2 %>% mutate(Split = sample.split(pull(survey2, 1), SplitRatio = 0.8))
+train.set <- survey3 %>% filter(Split == TRUE) %>% dplyr::select(-Split)
+test.set.x <- survey3 %>% filter(Split == FALSE) %>% 
+  dplyr::select(-c(Split, Heart_Disease))
+test.set.y <- survey3 %>% filter(Split == FALSE) %>% dplyr::select(-Split) %>% 
+  dplyr::select(Heart_Disease)
+
+# Fit logistic regression model to training data
+glm.fit = glm(Heart_Disease ~ ., data=train.set, family=binomial)
+summary(glm.fit)
+coef(glm.fit)
+
+# Predict outcome in test set
+predicted = glm.fit %>% predict(test.set.x, type = "response")
+predicted.classes = ifelse(predicted > 0.5, 1, 0)
+
+# Creating cross table
+cross <- CrossTable(test.set.y$Heart_Disease, predicted.classes, prop.chisq = FALSE)
+
+# Calculating Precision
+precision <- cross$prop.col[4]
+precision
+
+# Calculating Recall
+recall <- cross$prop.row[4]
+recall
+
+# Calculating F1 Score
+F1 <- (2 * (precision * recall)) / (precision + recall)
+F1
+
+# With CV
+glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
+
+# Adjusted cross validation estimate of prediction error
+glm.fit.cv$delta[2]
+```
+
+## Stepwise Logistic
+```{r}
+# Performing stepwise selection on logistic model using AIC
+set.seed(100)
+step.model <- glm.fit %>% stepAIC(trace = FALSE)
+coef(step.model)
+
+# Predict outcome in test set
+predicted1 = step.model %>% predict(test.set.x, type = "response")
+predicted.classes1 = ifelse(predicted1 > 0.5, 1, 0)
+
+# Creating cross table
+cross1 <- CrossTable(test.set.y$Heart_Disease, predicted.classes1, prop.chisq = FALSE)
+
+# Calculating Precision
+precision1 <- cross1$prop.col[4]
+precision1
+
+# Calculating Recall
+recall1 <- cross1$prop.row[4]
+recall1
+
+# Calculating F1 Score
+F1_step <- (2 * (precision1 * recall1)) / (precision1 + recall1)
+F1_step
 ```
