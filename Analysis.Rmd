@@ -13,6 +13,18 @@ library(missMDA)
 library(psych)#dummy.code
 library(class) #knn
 library(gmodels) # CrossTable()
+library(caret)
+library(dplyr)
+library(party)#ctree
+library(ISLR)#
+require(tree)
+library(caret)
+library(rpart)
+library(ipred)
+library(ROCR)
+library(pROC)
+library(rpart.plot)
+library(wesanderson)
 ```
 
 ## Reading in Dataset
@@ -24,7 +36,7 @@ dat <- haven::read_xpt("LLCP2021.XPT")
 ```{r}
 # Variables are initially chosen based on domain knowledge of risk factors for heart disease
 # Many variables are also redundant, thus one will be chosen for that feature
-survey1 <- dat %>% select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
+survey1 <- dat %>% dplyr::select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
                           PHYSHLTH,`_HCVU652`, MEDCOST1, `_RFHYPE6`,
                           `_RFCHOL3`, CVDSTRK3, DIABETE4, `_SEX`,
                           `_EDUCAG`, INCOME3, `_BMI5`, `_SMOKER3`,
@@ -44,7 +56,7 @@ survey1 <- dat %>% select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
   mutate(Heart_Disease = recode(Heart_Disease, '2' = 0), 
          Depression = recode(Depression, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
          Ment_Health = recode(Ment_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
-         Gen_Health = recode(Gen_Health, '2' = 0, '3' = as.numeric(NA)),
+         Gen_Health = recode(Gen_Health, '2' = 0, '3' = as.numeric(NA), '9' = as.numeric(NA)),
          Phys_Health = recode(Phys_Health, '88' = 0, '77' = as.numeric(NA), '99' = as.numeric(NA)),
          Health_Cov = recode(Health_Cov, '2' = 0, '9' = as.numeric(NA)),
          Med_Cost = recode(Med_Cost, '2' = 0,
@@ -65,7 +77,6 @@ survey1 <- dat %>% select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
          Sodium_Intake = recode(Sodium_Intake, '2' = 0, '7' = as.numeric(NA), '9' = as.numeric(NA)),
          Fruit = recode(Fruit, '2' = 0, '9' = as.numeric(NA)),
          Veggies = recode(Veggies, '2' = 0, '9' = as.numeric(NA)))
-
 glimpse(survey1)
 ```
 
@@ -198,22 +209,16 @@ NA - don't know, refused, missing
 ```{r, warning=FALSE}
 # Missingness
 colSums(is.na(survey1)) / nrow(survey1)
-
 # Drop variables with >80% missingness
-survey2 <- survey1 %>% select(-Sodium_Intake)
-
-# Impute continuous BMI variable with mean imputation
-mean_bmi <- mean(survey2$BMI, na.rm = T)
-survey2 <- survey2 %>% mutate(BMI = ifelse(is.na(BMI), mean_bmi, BMI))
-
-# Impute categorical variables with sequential, random hot-deck imputation
+survey2 <- survey1 %>% dplyr::select(-Sodium_Intake)
+# Impute variables with sequential, random hot-deck imputation
 survey2 <- hotdeck(survey2)
-
+survey2 <- survey2 %>% dplyr::select(1:21)
 # Checking for duplicates in original dataset
 dat$SEQNO <- as.factor(dat$SEQNO)
 duplicates <- dat %>% group_by(SEQNO, `_STATE`) %>%
   summarize(count = n()) %>% filter(count > 1)
-dat2 <- dat %>% select(-c(`_STATE`:`_PSU`))
+dat2 <- dat %>% dplyr::select(-c(`_STATE`:`_PSU`))
 table(sapply(dat2, class))
 # No duplicates found
 ```
@@ -246,20 +251,15 @@ knn_df <- cbind(knn_df, Diabete)
 Remove the variables the not will be used
 
 ```{r}
-knn_df <- subset(knn_df, select = -c(Diabetes, Heart_Disease_imp, Depression_imp,
-                                     Ment_Health_imp, Gen_Health_imp, Phys_Health_imp, 
-                                     Health_Cov_imp, Med_Cost_imp, BP_imp,  Chol_imp,
-                                     Stroke_imp, Diabetes_imp,Sex_imp, Education_imp,
-                                     Income_imp, BMI_imp, Smoking_imp, Avg_Drinks_imp,
-                                     Exercise_imp, Age_Groups_imp, Fruit_imp,Veggies_imp))
+knn_df <- subset(knn_df, select = -c(Diabetes))
 ```
 
 
 Training set and Testing set Split
 ```{r}
 knn_df$Heart_Disease <- as.factor(knn_df$Heart_Disease)
-hd_labels <-  knn_df %>% select(Heart_Disease)
-knn_df <- knn_df %>% select(-Heart_Disease)
+hd_labels <-  knn_df %>% dplyr::select(Heart_Disease)
+knn_df <- knn_df %>% dplyr::select(-Heart_Disease)
 
 training_size <- floor(0.8 * nrow(knn_df))
 set.seed(100)
@@ -275,8 +275,9 @@ Y_test <- hd_labels[-train_ind, ]
 
 Preliminary KNN
 ```{r}
-k_val <- floor(sqrt(sqrt(nrow(knn_df))))
-#k_val <- 661
+#k_val <- floor(sqrt(sqrt(nrow(knn_df))))
+#k_val <- 301
+k_val <- 11
 prelim_KNN <- knn(train = X_train,
                    test = X_test,
                    cl = Y_train,
@@ -297,5 +298,128 @@ Recall = TP / (TP + FN)
 
 ```{r}
 175 / (175 + 7001)
+```
+
+## Cross Validation 
+
+Source code: https://stats.stackexchange.com/questions/318968/knn-and-k-folding-in-r
+
+```{r}
+set.seed(100)
+trControl <- trainControl(method  = "cv", number  = 5)
+fit_3 <- train(x = knn_df,
+             y = hd_labels$Heart_Disease,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 3),
+             trControl  = trControl,
+             metric     = "Accuracy")
+```
+
+```{r}
+# trControl <- trainControl(method  = "cv", number  = 5, summaryFunction = f1)
+fit_5 <- train(x = knn_df,
+             y = hd_labels$Heart_Disease,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 5),
+             trControl  = trControl,
+             metric     = "F1")
+```
+
+```{r}
+# trControl <- trainControl(method  = "cv", number  = 5, summaryFunction = f1)
+fit_7 <- train(x = knn_df,
+             y = hd_labels$Heart_Disease,
+             method     = "knn",
+             tuneGrid   = expand.grid(k = 7),
+             trControl  = trControl,
+             metric     = "F1")
+```
+
+
+Bagging Classification Tree
+```{r}
+# Preprocessing data
+cate_names <- c("Heart_Disease", "Depression","Gen_Health",  "Health_Cov",
+           "Med_Cost", "BP", "Chol" ,"Stroke","Diabetes" ,"Sex",
+           "Education", "Income" , "Smoking" ,"Exercise", "Age_Groups","Fruit","Veggies")
+
+# https://www.listendata.com/2015/05/converting-multiple-numeric-variables.html
+survey2[,cate_names] <- lapply(survey2[,cate_names] , factor)
+```
+
+Train test split
+```{r}
+training_size <- floor(0.8 * nrow(survey2))
+set.seed(100)
+train_ind <- sample(seq_len(nrow(survey2)), size = training_size)
+train_set <- survey2[train_ind, ]
+test_set <- survey2[-train_ind, ]
+```
+
+Model
+
+```{r}
+bag <- bagging(
+  formula = Heart_Disease ~ .,
+  data = train_set,
+  coob = TRUE,
+  control = rpart.control(minsplit = 2, cp = 0)
+)
+```
+
+Confusion matrix
+
+```{r}
+y_pred <- predict(object = bag,
+                  newdata = test_set,
+                  type = 'class')
+                  cate_pred <- rep(NA, length(y_pred))
+                  
+cate_pred <- rep(NA, length(y_pred))
+cate_pred[y_pred == 1] <- 'Heart Disease'
+cate_pred[y_pred == 0] <- 'No Heart Disease'
+cate_pred <- as.factor(cate_pred)
+
+cate_label <-  rep(NA, length(y_pred))
+cate_label[test_set$Heart_Disease == 1] <- 'Heart Disease'
+cate_label[test_set$Heart_Disease == 0] <- 'No Heart Disease'
+cate_label <- as.factor(cate_label)
+
+
+Predicted <- cate_pred
+Observed <- cate_label
+
+CrossTable(x = Observed , y = Predicted, prop.chisq = FALSE)
+```
+
+
+ROC curve
+
+```{r}
+y_prob <- predict(object = bag,
+                  newdata = test_set,
+                  type = "prob")
+                  
+roc_perf <- performance(bagging_pred,"tpr","fpr")
+plot(roc_perf, main = "ROC Curve of Bagging Classification Trees")
+
+#auc
+auc_perf <- performance(bagging_pred, measure = "auc")
+auc_perf@y.values[[1]]
+
+```
+
+
+Variance Importance
+```{r}
+var_importance <- varImp(bag)
+
+VI <- data.frame(var=rownames(var_importance), imp=var_importance)
+VI_plot <- VI[order(VI$Overall, decreasing=TRUE),]
+top5_vi <- VI_plot[1:5, ]
+mycol = wes_palette("Royal2", n = 5)
+barplot(top5_vi$Overall, main = 'Top 5 Most Important Variables', xlab = 'Overall Importance', ylab = 'Variables', 
+        col = wes_palette("Royal2", n = 5), cex.axis=0.8, horiz = T, las = 2)
+legend('topright', top5_vi$var, fill = mycol)
 ```
 
