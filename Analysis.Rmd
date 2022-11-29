@@ -14,6 +14,9 @@ library(visreg)
 library(caret)
 library(MASS)
 library(boot)
+library(ROCR)
+library(gmodels)
+library(mice)
 ```
 
 ## Reading in Dataset
@@ -54,8 +57,8 @@ survey1 <- dat %>% dplyr::select(`_MICHD`, ADDEPEV3, MENTHLTH, `_RFHLTH`,
          Chol = recode(Chol, '1' = 0, '2' = 1, '9' = as.numeric(NA)),
          Stroke = recode(Stroke, '1' = 1, '2' = 0,
                          '7' = as.numeric(NA), '9' = as.numeric(NA)),
-         Diabetes = recode(Diabetes, '2' = 1, '3' = 0, '4' = 2,
-                           '1' = 1, '7' = as.numeric(NA),
+         Diabetes = recode(Diabetes, '2' = 2, '3' = 0, '4' = 1,
+                           '1' = 2, '7' = as.numeric(NA),
                            '9' = as.numeric(NA)),
          Education = recode(Education, '9' = as.numeric(NA)),
          Income = recode(Income, '77' = as.numeric(NA), '99' = as.numeric(NA)),
@@ -122,8 +125,8 @@ NA - don't know, refused
 
 Diabetes: (Ever told) you have diabetes (If "Yes" and respondent is female, ask "Was this only when you were pregnant?". If Respondent says pre-diabetes or borderline diabetes, use response code 4.) \
 0 - no \
-1 - yes \
-2 - pre-diabetes or borderline \
+1 - pre-diabetes or borderline \
+2 - yes \
 NA - don't know, refused, missing
 
 Sex: Indicate sex of respondent \
@@ -207,6 +210,9 @@ survey2 <- survey1 %>% dplyr::select(-Sodium_Intake)
 survey2 <- hotdeck(survey2)
 survey2 <- survey2 %>% dplyr::select(1:21)
 
+# Class imbalance
+sum(survey2$Heart_Disease) / nrow(survey2)
+
 # Checking for duplicates in original dataset
 dat$SEQNO <- as.factor(dat$SEQNO)
 duplicates <- dat %>% group_by(SEQNO, `_STATE`) %>%
@@ -214,6 +220,42 @@ duplicates <- dat %>% group_by(SEQNO, `_STATE`) %>%
 dat2 <- dat %>% dplyr::select(-c(`_STATE`:`_PSU`))
 table(sapply(dat2, class))
 # No duplicates found
+```
+
+## Unsupervised Analysis
+```{r}
+# Hierarchical Clustering
+
+# Use 10000 random rows for clustering
+set.seed(100)
+survey_cluster <- survey2[sample(nrow(survey2), 10000),]
+dis <- dist(survey_cluster[,-1])
+
+# Hierarchical clustering with complete linkage
+set.seed(100)
+hc <- hclust(dis, method = 'complete')
+
+# Plotting
+plot(hc)
+rect.hclust(hc, 4)
+
+# Divide into 4 clusters
+hc_2 <- cutree(hc, 4)
+
+# Create dataframe with clusters and diagnosis for each observation
+disease <- survey_cluster %>% pull(Heart_Disease)
+comp <- data.frame(hc_2, disease)
+
+# Create table of amount of each diagnosis for each cluster
+with(comp, table(hc_2, disease))
+
+# K-Means Clustering
+
+set.seed(100)
+km <- kmeans(survey_cluster[,-1], 2, nstart = 100)
+disease <- survey_cluster %>% pull(Heart_Disease)
+comp2 <- data.frame(km$cluster, disease)
+with(comp2, table(km$cluster, disease))
 ```
 
 ## Relationship Between Mental Health Variables and Heart Disease
@@ -227,17 +269,17 @@ chisq.test(survey1$Heart_Disease, survey1$Depression)
 
 # Logistic regression to explore relationship between Depression and Heart_Disease
 # Performed on non-imputed dataset
-logit1 <- glm(Heart_Disease ~ as.factor(Depression), data = survey1)
+logit1 <- glm(Heart_Disease ~ as.factor(Depression), data = survey1, family = "binomial")
 summary(logit1)
-# Individuals that have been told they have a depressive disorder have a 0.028 higher log odds of ever having reported coronary heart disease or myocardial infarction compared to individuals that have never been told they have a depressive disorder
-# This coefficient has a statistically significant t-statistic with a p-value below 0.05
+# Individuals that have been told they have a depressive disorder have a 0.34 higher log odds of ever having reported coronary heart disease or myocardial infarction compared to individuals that have never been told they have a depressive disorder
+# This coefficient has a statistically significant z-statistic with a p-value below 0.05
 
 exp(coef(logit1))
 # Individuals that have been told they have a depressive disorder have a 2.8% higher odds of ever having reported coronary heart disease or myocardial infarction compared to individuals that have never been told they have a depressive disorder
 
 # Logistic regression to explore relationship between Ment_Health and Heart_Disease
 # Performed on non-imputed dataset
-logit2 <- glm(Heart_Disease ~ Ment_Health, data = survey1)
+logit2 <- glm(Heart_Disease ~ Ment_Health, data = survey1, family = "binomial")
 summary(logit2)
 # For every one day increase in mental health being considered not good within the past 30 days, the log odds of an individual ever having reported coronary heart disease or myocardial infarction increases by 0.001
 # This coefficient has a statistically significant t-statistic with a p-value below 0.05
@@ -245,7 +287,7 @@ exp(coef(logit2))
 # For every one day increase in mental health being considered not good within the past 30 days, the odds of an individual ever having reported coronary heart disease or myocardial infarction increases by 0.1%
 ```
 
-## Logistic Regression for Prediction
+## Logistic Regression for Prediction with Mental Health Variables
 ```{r}
 # Change categorical variables to factor
 cols <- c("Depression", "Gen_Health", "Health_Cov", "Med_Cost", "BP", "Chol", "Stroke",
@@ -266,13 +308,90 @@ test.set.y <- survey3 %>% filter(Split == FALSE) %>% dplyr::select(-Split) %>%
 glm.fit = glm(Heart_Disease ~ ., data=train.set, family=binomial)
 summary(glm.fit)
 coef(glm.fit)
+exp(coef(glm.fit))
 
 # Predict outcome in test set
 predicted = glm.fit %>% predict(test.set.x, type = "response")
 predicted.classes = ifelse(predicted > 0.5, 1, 0)
 
+# Creating prediction object
+pred <- prediction(predicted, test.set.y)
+
+# ROC curve using performance
+perf <- performance(pred, "tpr", "fpr")
+plot(perf)
+
+# Calculating and printing area under the ROC curve
+perf_auc <- performance(pred, measure = "auc")
+print(perf_auc@y.values)
+
 # Creating cross table
-cross <- CrossTable(test.set.y$Heart_Disease, predicted.classes, prop.chisq = FALSE)
+test.set.y$Heart_Disease <- factor(test.set.y$Heart_Disease, c(levels = 0:1),
+                                   labels = c("No Heart Disease", "Heart Disease"))
+predicted.classes <- factor(predicted.classes, c(levels = 0:1),
+                            labels = c("No Heart Disease", "Heart Disease"))
+cross <- CrossTable(test.set.y$Heart_Disease, predicted.classes, prop.chisq = FALSE,
+                    dnn = c("Observed", "Predicted"))
+
+# Calculating Precision
+precision <- cross$prop.col[4]
+precision
+
+# Calculating Recall
+recall <- cross$prop.row[4]
+recall
+
+# Calculating F1 Score
+F1 <- (2 * (precision * recall)) / (precision + recall)
+F1
+
+# With CV
+glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
+
+# Adjusted cross validation estimate of prediction error
+glm.fit.cv$delta[2]
+```
+
+## Logistic Regression for Prediction without Mental Health Variables
+```{r}
+# Split dataset into training and testing data
+set.seed(100)
+survey3 <- survey2 %>% dplyr::select(-c(Depression, Ment_Health)) %>% 
+  mutate(Split = sample.split(pull(survey2, 1), SplitRatio = 0.8))
+train.set <- survey3 %>% filter(Split == TRUE) %>% dplyr::select(-Split)
+test.set.x <- survey3 %>% filter(Split == FALSE) %>% 
+  dplyr::select(-c(Split, Heart_Disease))
+test.set.y <- survey3 %>% filter(Split == FALSE) %>% dplyr::select(-Split) %>% 
+  dplyr::select(Heart_Disease)
+
+# Fit logistic regression model to training data
+glm.fit = glm(Heart_Disease ~ ., data=train.set, family=binomial)
+summary(glm.fit)
+coef(glm.fit)
+exp(coef(glm.fit))
+
+# Predict outcome in test set
+predicted = glm.fit %>% predict(test.set.x, type = "response")
+predicted.classes = ifelse(predicted > 0.5, 1, 0)
+
+# Creating prediction object
+pred <- prediction(predicted, test.set.y)
+
+# ROC curve using performance
+perf <- performance(pred, "tpr", "fpr")
+plot(perf)
+
+# Calculating and printing area under the ROC curve
+perf_auc <- performance(pred, measure = "auc")
+print(perf_auc@y.values)
+
+# Creating cross table
+test.set.y$Heart_Disease <- factor(test.set.y$Heart_Disease, c(levels = 0:1),
+                                   labels = c("No Heart Disease", "Heart Disease"))
+predicted.classes <- factor(predicted.classes, c(levels = 0:1),
+                            labels = c("No Heart Disease", "Heart Disease"))
+cross <- CrossTable(test.set.y$Heart_Disease, predicted.classes, prop.chisq = FALSE,
+                    dnn = c("Observed", "Predicted"))
 
 # Calculating Precision
 precision <- cross$prop.col[4]
@@ -299,23 +418,48 @@ glm.fit.cv$delta[2]
 set.seed(100)
 step.model <- glm.fit %>% stepAIC(trace = FALSE)
 coef(step.model)
+exp(coef(step.model))
 
 # Predict outcome in test set
-predicted1 = step.model %>% predict(test.set.x, type = "response")
-predicted.classes1 = ifelse(predicted1 > 0.5, 1, 0)
+predicted = step.model %>% predict(test.set.x, type = "response")
+predicted.classes = ifelse(predicted > 0.5, 1, 0)
+
+# Creating prediction object
+test.set.y <- test.set.y %>% 
+  mutate(Heart_Disease = ifelse(Heart_Disease == "No Heart Disease", 0, 1))
+pred <- prediction(predicted, test.set.y)
+
+# ROC curve using performance
+perf <- performance(pred, "tpr", "fpr")
+plot(perf)
+
+# Calculating and printing area under the ROC curve
+perf_auc <- performance(pred, measure = "auc")
+print(perf_auc@y.values)
 
 # Creating cross table
-cross1 <- CrossTable(test.set.y$Heart_Disease, predicted.classes1, prop.chisq = FALSE)
+test.set.y$Heart_Disease <- factor(test.set.y$Heart_Disease, c(levels = 0:1),
+                                   labels = c("No Heart Disease", "Heart Disease"))
+predicted.classes <- factor(predicted.classes, c(levels = 0:1),
+                            labels = c("No Heart Disease", "Heart Disease"))
+cross <- CrossTable(test.set.y$Heart_Disease, predicted.classes, prop.chisq = FALSE,
+                    dnn = c("Observed", "Predicted"))
 
 # Calculating Precision
-precision1 <- cross1$prop.col[4]
-precision1
+precision <- cross$prop.col[4]
+precision
 
 # Calculating Recall
-recall1 <- cross1$prop.row[4]
-recall1
+recall <- cross$prop.row[4]
+recall
 
 # Calculating F1 Score
-F1_step <- (2 * (precision1 * recall1)) / (precision1 + recall1)
-F1_step
+F1 <- (2 * (precision * recall)) / (precision + recall)
+F1
+
+# With CV
+glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
+
+# Adjusted cross validation estimate of prediction error
+glm.fit.cv$delta[2]
 ```
