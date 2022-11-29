@@ -16,7 +16,6 @@ library(MASS)
 library(boot)
 library(ROCR)
 library(gmodels)
-library(mice)
 ```
 
 ## Reading in Dataset
@@ -319,7 +318,8 @@ pred <- prediction(predicted, test.set.y)
 
 # ROC curve using performance
 perf <- performance(pred, "tpr", "fpr")
-plot(perf)
+plot(perf, main = "ROC Curve of Logistic Model with All Variables", 
+     sub = "AUC = 0.84")
 
 # Calculating and printing area under the ROC curve
 perf_auc <- performance(pred, measure = "auc")
@@ -346,10 +346,10 @@ F1 <- (2 * (precision * recall)) / (precision + recall)
 F1
 
 # With CV
-glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
+# glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
 
 # Adjusted cross validation estimate of prediction error
-glm.fit.cv$delta[2]
+# glm.fit.cv$delta[2]
 ```
 
 ## Logistic Regression for Prediction without Mental Health Variables
@@ -365,13 +365,13 @@ test.set.y <- survey3 %>% filter(Split == FALSE) %>% dplyr::select(-Split) %>%
   dplyr::select(Heart_Disease)
 
 # Fit logistic regression model to training data
-glm.fit = glm(Heart_Disease ~ ., data=train.set, family=binomial)
-summary(glm.fit)
-coef(glm.fit)
-exp(coef(glm.fit))
+glm.fit2 = glm(Heart_Disease ~ ., data=train.set, family=binomial)
+summary(glm.fit2)
+coef(glm.fit2)
+exp(coef(glm.fit2))
 
 # Predict outcome in test set
-predicted = glm.fit %>% predict(test.set.x, type = "response")
+predicted = glm.fit2 %>% predict(test.set.x, type = "response")
 predicted.classes = ifelse(predicted > 0.5, 1, 0)
 
 # Creating prediction object
@@ -379,7 +379,8 @@ pred <- prediction(predicted, test.set.y)
 
 # ROC curve using performance
 perf <- performance(pred, "tpr", "fpr")
-plot(perf)
+plot(perf, main = "ROC Curve of Logistic Model without Mental Health Variables",
+           sub = "AUC = 0.84")
 
 # Calculating and printing area under the ROC curve
 perf_auc <- performance(pred, measure = "auc")
@@ -406,10 +407,10 @@ F1 <- (2 * (precision * recall)) / (precision + recall)
 F1
 
 # With CV
-glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
+# glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
 
 # Adjusted cross validation estimate of prediction error
-glm.fit.cv$delta[2]
+# glm.fit.cv$delta[2]
 ```
 
 ## Stepwise Logistic
@@ -431,7 +432,9 @@ pred <- prediction(predicted, test.set.y)
 
 # ROC curve using performance
 perf <- performance(pred, "tpr", "fpr")
-plot(perf)
+roc_plot <- plot(perf, main = "ROC Curve of Stepwise Logistic Model",
+     sub = "AUC = 0.84")
+roc_plot
 
 # Calculating and printing area under the ROC curve
 perf_auc <- performance(pred, measure = "auc")
@@ -458,8 +461,8 @@ F1 <- (2 * (precision * recall)) / (precision + recall)
 F1
 
 # With CV
-glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
+# glm.fit.cv <- cv.glm(train.set, glm.fit, K = 10)
 
 # Adjusted cross validation estimate of prediction error
-glm.fit.cv$delta[2]
+# glm.fit.cv$delta[2]
 ```
